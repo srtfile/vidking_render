@@ -1,4 +1,5 @@
 fastapi
 uvicorn[standard]
 requests
-playwright
+playwright==1.44.0
+ 
