@@ -2,11 +2,14 @@ services:
   - type: web
     name: vidking-extractor
     runtime: python
-    buildCommand: |
-      pip install -r requirements.txt
-      python -m playwright install chromium
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright &&
+      python -m playwright install chromium &&
       python -m playwright install-deps chromium
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/src/.playwright
