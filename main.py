@@ -14,7 +14,7 @@ import time
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 app = FastAPI(title="VidKing Stream Extractor")
 
@@ -159,9 +159,205 @@ async def extract_with_playwright(embed_url: str, timeout: int = 45) -> list:
 # Routes
 # ─────────────────────────────────────────────
 
-@app.get("/")
+HTML_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>VidKing Stream Extractor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px;
+    }
+    h1 { font-size: 1.8rem; color: #ff5555; margin-bottom: 6px; }
+    p.sub { color: #888; margin-bottom: 32px; font-size: 0.95rem; }
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 28px;
+      width: 100%;
+      max-width: 560px;
+    }
+    label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 4px; margin-top: 16px; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 0.95rem;
+      outline: none;
+    }
+    input:focus, select:focus { border-color: #ff5555; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    button {
+      margin-top: 24px;
+      width: 100%;
+      padding: 12px;
+      background: #ff5555;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #e03c3c; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    #result { margin-top: 28px; width: 100%; max-width: 560px; }
+    .result-box {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .result-box h2 { font-size: 1rem; color: #aaa; margin-bottom: 12px; }
+    .url-item {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      word-break: break-all;
+      font-size: 0.85rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .url-item a { color: #ff5555; text-decoration: none; flex: 1; }
+    .url-item a:hover { text-decoration: underline; }
+    .copy-btn {
+      background: #2a2a2a;
+      color: #ccc;
+      border: none;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      margin-top: 0;
+      width: auto;
+    }
+    .copy-btn:hover { background: #ff5555; color: #fff; }
+    .error { color: #ff5555; font-size: 0.9rem; margin-top: 12px; }
+    .spinner {
+      display: none;
+      margin-top: 20px;
+      text-align: center;
+      color: #888;
+      font-size: 0.9rem;
+    }
+    .spinner.active { display: block; }
+  </style>
+</head>
+<body>
+  <h1>🎬 VidKing Extractor</h1>
+  <p class="sub">Extract m3u8 / mpd stream URLs from vidking.net</p>
+
+  <div class="card">
+    <label>TMDB ID</label>
+    <input id="tmdb" type="text" placeholder="e.g. 76479" />
+
+    <label>Media Type</label>
+    <select id="type">
+      <option value="tv">TV Show</option>
+      <option value="movie">Movie</option>
+    </select>
+
+    <div class="row" id="ep-row">
+      <div>
+        <label>Season</label>
+        <input id="season" type="number" value="1" min="1" />
+      </div>
+      <div>
+        <label>Episode</label>
+        <input id="episode" type="number" value="1" min="1" />
+      </div>
+    </div>
+
+    <button id="btn" onclick="extract()">Extract Stream URL</button>
+    <div class="spinner" id="spinner">⏳ Extracting... this may take up to 45s</div>
+  </div>
+
+  <div id="result"></div>
+
+  <script>
+    document.getElementById('type').addEventListener('change', function() {
+      document.getElementById('ep-row').style.display = this.value === 'movie' ? 'none' : 'flex';
+    });
+
+    async function extract() {
+      const tmdb = document.getElementById('tmdb').value.trim();
+      if (!tmdb) { alert('Please enter a TMDB ID.'); return; }
+
+      const type = document.getElementById('type').value;
+      const season = document.getElementById('season').value;
+      const episode = document.getElementById('episode').value;
+
+      const btn = document.getElementById('btn');
+      const spinner = document.getElementById('spinner');
+      const result = document.getElementById('result');
+
+      btn.disabled = true;
+      spinner.classList.add('active');
+      result.innerHTML = '';
+
+      let url = `/extract?tmdb=${tmdb}&type=${type}`;
+      if (type === 'tv') url += `&season=${season}&episode=${episode}`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) {
+          result.innerHTML = `<p class="error">❌ ${data.detail || 'No stream URLs found.'}</p>`;
+        } else {
+          let html = `<div class="result-box"><h2>✅ Found ${data.count} stream URL(s)</h2>`;
+          data.urls.forEach((u, i) => {
+            html += `<div class="url-item">
+              <a href="${u}" target="_blank">Stream ${i+1}: ${u}</a>
+              <button class="copy-btn" onclick="copyUrl('${u}', this)">Copy</button>
+            </div>`;
+          });
+          html += '</div>';
+          result.innerHTML = html;
+        }
+      } catch (e) {
+        result.innerHTML = `<p class="error">❌ Request failed: ${e.message}</p>`;
+      } finally {
+        btn.disabled = false;
+        spinner.classList.remove('active');
+      }
+    }
+
+    function copyUrl(url, btn) {
+      navigator.clipboard.writeText(url);
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    }
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
 def root():
-    return {"status": "ok", "message": "VidKing Stream Extractor is running."}
+    return HTMLResponse(content=HTML_PAGE, status_code=200)
 
 
 @app.get("/extract")
